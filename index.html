@@ -138,13 +138,6 @@ document.head.appendChild(link);
     -webkit-backdrop-filter: blur(12px);
   }
 
-  #logo {
-    height: 18px;
-    width: auto;
-    flex-shrink: 0;
-    flex: 1;
-  }
-
   #app-title {
     font-family: var(--font-display);
     font-size: 1.1rem;
@@ -1117,15 +1110,7 @@ document.head.appendChild(link);
 
 <!-- Top bar -->
 <header id="topbar">
-  <svg id="logo" viewBox="0 0 112 28" height="18" aria-label="Reader">
-    <text x="1" y="20" font-family="'Playfair Display', Georgia, serif" font-weight="900" font-size="26" letter-spacing="3" fill="currentColor"><tspan style="fill:var(--accent)">R</tspan>eader</text>
-    <g opacity="0.15" stroke="currentColor" fill="none">
-      <line x1="1" y1="25" x2="1" y2="27" stroke-width="0.6"/>
-      <line x1="1" y1="26" x2="105" y2="26" stroke-width="0.35"/>
-      <line x1="105" y1="25" x2="105" y2="27" stroke-width="0.6"/>
-    </g>
-  </svg>
-  <span id="app-title" style="display:none"></span>
+  <span id="app-title"></span>
 
   <button class="toolbar-btn" id="btn-open" title="Open file" onclick="openFile()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -1136,6 +1121,12 @@ document.head.appendChild(link);
   <button class="toolbar-btn" id="btn-toc" title="Table of contents" onclick="toggleToc()" style="display:none">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/>
+    </svg>
+  </button>
+
+  <button class="toolbar-btn" id="btn-note" title="Add a note" onclick="startDocNote()" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
     </svg>
   </button>
 
@@ -1161,7 +1152,7 @@ document.head.appendChild(link);
 <!-- Drop zone -->
 <main id="dropzone">
   <div class="drop-icon">📖</div>
-  <h1 class="drop-title" id="dropzone-heading">Drop a Markdown file</h1>
+  <h1 class="drop-title" id="dropzone-heading">Drop a Markdown file or folder</h1>
   <p class="drop-sub" id="dropzone-sub">Or paste a URL below — works offline, nothing leaves your device</p>
 
   <button class="drop-btn" onclick="openFile()">
@@ -1289,6 +1280,10 @@ let originalMarkdownText = '';
 let savedRange = null;
 let activeAnnotationId = null;
 
+// ─── Folder State ───
+let folderFiles = {}; // path → markdown text
+let currentFolderFile = '';
+
 // ─── Init ───
 document.addEventListener('DOMContentLoaded', () => {
   applyFont(currentFont, false);
@@ -1338,6 +1333,95 @@ function handleFile(file) {
   };
   reader.onerror = () => showError('Could not read the file.');
   reader.readAsText(file);
+}
+
+async function handleFolder(dirEntry) {
+  showLoading();
+  folderFiles = {};
+  currentFolderFile = '';
+
+  async function readDir(entry, path = '') {
+    const reader = entry.createReader();
+    const entries = await new Promise((resolve, reject) => {
+      const all = [];
+      (function read() {
+        reader.readEntries(results => {
+          if (!results.length) return resolve(all);
+          all.push(...results);
+          read();
+        }, reject);
+      })();
+    });
+
+    for (const e of entries) {
+      const ePath = path ? path + '/' + e.name : e.name;
+      if (e.isDirectory) {
+        await readDir(e, ePath);
+      } else if (e.isFile && /\.(md|markdown|txt)$/i.test(e.name)) {
+        const file = await new Promise(r => e.file(r));
+        const text = await file.text();
+        folderFiles[ePath] = text;
+      }
+    }
+  }
+
+  await readDir(dirEntry);
+  const paths = Object.keys(folderFiles).sort();
+  if (!paths.length) {
+    showLoading(false);
+    showError('No markdown files found in folder.');
+    return;
+  }
+
+  // Pick starting file: README.md, index.md, or first alphabetically
+  const start = paths.find(p => /^readme\.md$/i.test(p.split('/').pop()))
+    || paths.find(p => /^index\.md$/i.test(p.split('/').pop()))
+    || paths[0];
+
+  currentDocSource = dirEntry.name + '/' + start;
+  history.replaceState(null, '', '#' + encodeURIComponent(dirEntry.name));
+  loadFolderFile(start);
+}
+
+function loadFolderFile(path) {
+  const text = folderFiles[path];
+  if (!text) return;
+  currentFolderFile = path;
+  currentDocSource = path;
+  renderMarkdown(text, path.split('/').pop());
+  setupFolderLinks();
+}
+
+function setupFolderLinks() {
+  if (!Object.keys(folderFiles).length) return;
+  document.querySelectorAll('#content a[href]').forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('http') || href.startsWith('#')) return;
+
+    // Resolve relative path
+    const base = currentFolderFile.includes('/')
+      ? currentFolderFile.substring(0, currentFolderFile.lastIndexOf('/') + 1)
+      : '';
+    const resolved = normalizePath(base + href);
+
+    if (folderFiles[resolved]) {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        loadFolderFile(resolved);
+        window.scrollTo(0, 0);
+      });
+      a.style.cursor = 'pointer';
+    }
+  });
+}
+
+function normalizePath(path) {
+  const parts = [];
+  for (const p of path.split('/')) {
+    if (p === '..') parts.pop();
+    else if (p && p !== '.') parts.push(p);
+  }
+  return parts.join('/');
 }
 
 function loadFromUrl() {
@@ -1475,8 +1559,7 @@ function renderMarkdown(text, filename = 'document') {
   // Build ToC
   buildToc(content);
 
-  // Swap logo for document title
-  document.getElementById('logo').style.display = 'none';
+  // Set document title in topbar
   document.getElementById('app-title').style.display = '';
 
   // Restore saved annotations
@@ -1542,19 +1625,22 @@ function buildToc(content) {
 function showReader() {
   document.getElementById('dropzone').style.display = 'none';
   document.getElementById('reader').style.display = 'block';
+  document.getElementById('btn-note').style.display = '';
 }
 
 function showDropzone() {
   document.getElementById('dropzone').style.display = 'flex';
   document.getElementById('reader').style.display = 'none';
   document.getElementById('btn-toc').style.display = 'none';
-  document.getElementById('logo').style.display = '';
+  document.getElementById('btn-note').style.display = 'none';
   document.getElementById('app-title').style.display = 'none';
-  document.getElementById('dropzone-heading').textContent = 'Drop a Markdown file';
+  document.getElementById('dropzone-heading').textContent = 'Drop a Markdown file or folder';
   document.getElementById('dropzone-sub').textContent =
     'Or paste a URL below \u2014 works offline, nothing leaves your device';
   document.title = 'Reader';
   currentDocSource = '';
+  folderFiles = {};
+  currentFolderFile = '';
   history.replaceState(null, '', location.pathname);
   annotations = [];
   annotationCounter = 0;
@@ -1718,9 +1804,18 @@ function setupDragDrop() {
     }
   });
 
-  body.addEventListener('drop', e => {
+  body.addEventListener('drop', async e => {
     e.preventDefault();
     body.classList.remove('drag-over');
+
+    // Check for folder drop
+    const items = [...(e.dataTransfer.items || [])];
+    const entry = items[0]?.webkitGetAsEntry?.();
+    if (entry?.isDirectory) {
+      await handleFolder(entry);
+      return;
+    }
+
     const file = e.dataTransfer.files[0];
     if (file) handleFile(file);
   });
@@ -1871,11 +1966,23 @@ function startComment() {
 }
 
 function saveComment() {
-  if (!savedRange) return;
   const textarea = document.getElementById('comment-text');
   const comment = textarea.value.trim();
   if (!comment) return;
 
+  if (_docNoteMode) {
+    const id = 'ann-' + (++annotationCounter);
+    annotations.push({ id, type: 'note', text: '', comment });
+    document.getElementById('comment-popover').classList.remove('visible');
+    textarea.placeholder = 'Add your note…';
+    _docNoteMode = false;
+    updateExportButton();
+    saveAnnotations();
+    showToast('Note added');
+    return;
+  }
+
+  if (!savedRange) return;
   const id = 'ann-' + (++annotationCounter);
   const text = savedRange.toString();
   const spans = wrapRange(savedRange, 'ann-comment', id);
@@ -1892,6 +1999,22 @@ function saveComment() {
 function cancelComment() {
   document.getElementById('comment-popover').classList.remove('visible');
   savedRange = null;
+  _docNoteMode = false;
+}
+
+let _docNoteMode = false;
+
+function startDocNote() {
+  _docNoteMode = true;
+  savedRange = null;
+  const popover = document.getElementById('comment-popover');
+  const textarea = document.getElementById('comment-text');
+  popover.style.top = '60px';
+  popover.style.left = Math.max(8, (window.innerWidth - 320) / 2) + 'px';
+  popover.classList.add('visible');
+  textarea.value = '';
+  textarea.placeholder = 'Note on the whole document…';
+  textarea.focus();
 }
 
 function showAnnotationDetail(id, element) {
@@ -1968,6 +2091,8 @@ function exportAnnotations() {
       output += `${i + 1}. [DELETE] "${ann.text}"\n`;
     } else if (ann.type === 'checkbox') {
       output += `${i + 1}. [CHECK] "${ann.text}"\n`;
+    } else if (ann.type === 'note') {
+      output += `${i + 1}. [NOTE] ${ann.comment}\n`;
     } else {
       output += `${i + 1}. [COMMENT on "${ann.text}"] ${ann.comment}\n`;
     }
@@ -2031,7 +2156,7 @@ function saveAnnotations() {
     type: ann.type,
     text: ann.text,
     comment: ann.comment,
-    offset: ann.type === 'checkbox' ? -1 : getAnnotationOffset(ann.id)
+    offset: (ann.type === 'checkbox' || ann.type === 'note') ? -1 : getAnnotationOffset(ann.id)
   }));
   localStorage.setItem(key, JSON.stringify(data));
 }
@@ -2050,8 +2175,12 @@ function loadAnnotations() {
   data.forEach(ann => {
     const id = 'ann-' + (++annotationCounter);
 
+    if (ann.type === 'note') {
+      annotations.push({ id, type: 'note', text: '', comment: ann.comment });
+      return;
+    }
+
     if (ann.type === 'checkbox') {
-      // Restore checkbox state by matching text
       content.querySelectorAll('input[type="checkbox"]').forEach(cb => {
         const li = cb.closest('li');
         if (li && li.textContent.trim() === ann.text && !cb.checked) {
