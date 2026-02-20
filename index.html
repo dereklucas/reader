@@ -1535,8 +1535,8 @@ function renderMarkdown(text, filename = 'document') {
 
   content.innerHTML = metaHtml + html;
 
-  // Syntax highlighting
-  content.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  // Syntax highlighting — only highlight blocks with an explicit language tag
+  content.querySelectorAll('pre code[class*="language-"]').forEach(el => hljs.highlightElement(el));
 
   // Mermaid
   mermaid.initialize({
