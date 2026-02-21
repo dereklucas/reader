@@ -69,17 +69,19 @@ gh auth token
 
 The token is stored in your browser's localStorage — nothing is sent anywhere except directly to the GitHub API.
 
-## Bookmarklet
+## Annotate on any page
 
-`annotate.js` brings the same strike/comment/export workflow to any webpage. The easiest way to use it is as a bookmarklet — save this as a bookmark and click it on any page:
+The same strike/comment/export workflow works on any webpage, not just in Reader.
+
+**Chrome / Arc** — load the extension in developer mode:
+1. Go to `chrome://extensions` → enable Developer mode
+2. Load unpacked → select the `extension/` folder
+
+**Safari / Firefox** — use the bookmarklet (`annotate.js`). Save this as a bookmark and click it on any page:
 
 ```
-javascript:void(function(){var s=document.createElement('script');s.src='https://dereklucas.github.io/reader/boost/annotate.js?_='+Date.now();document.head.appendChild(s);}());
+javascript:void(function(){var s=document.createElement('script');s.src='https://dereklucas.github.io/reader/annotate.js?_='+Date.now();document.head.appendChild(s);}());
 ```
-
-Select any text to get the Strike and Comment toolbar. Export copies the same structured format as Reader, ready to paste into an LLM.
-
-Works in Arc, Chrome, Safari, and Firefox. Also works as an Arc Boost scoped to a specific domain (New Boost → paste `annotate.js` into the JavaScript field).
 
 ## Examples
 
